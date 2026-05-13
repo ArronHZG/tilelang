@@ -204,6 +204,21 @@ nsys `--stats=true` 会在运行结束后自动生成以下统计报表：
 
 **解读**：`tilelang_gemm_repeat` 占总 NVTX 时间的 **41.4%**，持续 **2.43 ms**，覆盖了 100 次 GEMM kernel 调用。
 
+
+#### 报告 4/7: CUDA API 调用统计 (`cuda_api_sum`)
+
+```
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)     Med (ns)    Min (ns)    Max (ns)   Name
+ --------  ---------------  ---------  -----------  -----------  ---------  ----------  -------
+     51.7      170,081,277        245    694,209.3      3,531.0      2,859  20,291,699  cudaLaunchKernel           ← CPU侧启动开销大!
+     33.4      109,833,772         16  6,864,610.8  3,870,875.5  1,992,723  48,104,320  cudaGetDeviceProperties_v2  ← 一次性设备查询
+     10.0       32,786,261         15  2,185,750.7  1,684,783.0     19,893   4,920,894  cuLibraryLoadData            ← 一次性库加载
+      2.0        6,490,404          4  1,622,601.0    582,656.5      6,673   5,318,418  cudaDeviceSynchronize       ← 4次同步(warmup/repeat/bench)
+```
+
+**解读**：`cudaLaunchKernel` 平均 **694 μs** 是 CPU 侧开销，远大于 GPU 上实际执行的 **23 μs**。这是正常的——CPU 发起调用到
+GPU 开始执行之间存在调度延迟。
+
 #### 报告 5/7: GPU Kernel 执行统计 (`cuda_gpu_kern_sum`) — 最重要！
 
 ```
@@ -221,19 +236,6 @@ nsys `--stats=true` 会在运行结束后自动生成以下统计报表：
 - 极差仅 **2.2 μs**（22.7 ~ 24.9），标准差 **0.5 μs** → 性能极其稳定！
 - 占总 GPU Kernel 时间的 **41.5%**
 
-#### 报告 4/7: CUDA API 调用统计 (`cuda_api_sum`)
-
-```
- Time (%)  Total Time (ns)  Num Calls   Avg (ns)     Med (ns)    Min (ns)    Max (ns)   Name
- --------  ---------------  ---------  -----------  -----------  ---------  ----------  -------
-     51.7      170,081,277        245    694,209.3      3,531.0      2,859  20,291,699  cudaLaunchKernel           ← CPU侧启动开销大!
-     33.4      109,833,772         16  6,864,610.8  3,870,875.5  1,992,723  48,104,320  cudaGetDeviceProperties_v2  ← 一次性设备查询
-     10.0       32,786,261         15  2,185,750.7  1,684,783.0     19,893   4,920,894  cuLibraryLoadData            ← 一次性库加载
-      2.0        6,490,404          4  1,622,601.0    582,656.5      6,673   5,318,418  cudaDeviceSynchronize       ← 4次同步(warmup/repeat/bench)
-```
-
-**解读**：`cudaLaunchKernel` 平均 **694 μs** 是 CPU 侧开销，远大于 GPU 上实际执行的 **23 μs**。这是正常的——CPU 发起调用到
-GPU 开始执行之间存在调度延迟。
 
 #### 报告 6/7 & 7/7: 内存传输统计
 
