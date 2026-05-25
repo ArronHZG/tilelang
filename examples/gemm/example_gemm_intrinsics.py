@@ -2,10 +2,10 @@ from tilelang import tvm as tvm
 from tvm import DataType
 import tilelang
 import tilelang.language as T
-from tilelang.cuda.intrinsics import get_swizzle_layout
-from tilelang.cuda.intrinsics.macro.mma_macro_generator import (
-    TensorCoreIntrinEmitter,
-)
+# 使用统一的公共入口 tilelang.intrinsics，避免直接依赖 tilelang.cuda 子包
+# （某些环境下 tilelang.cuda 可能不在 Python 搜索路径中）
+from tilelang.intrinsics import get_swizzle_layout
+from tilelang.intrinsics import TensorCoreIntrinEmitter
 
 
 def make_swizzle_layout(shared_buf):
@@ -169,14 +169,28 @@ def main(M=4096, N=4096, K=4096):
 
     profiler = kernel.get_profiler()
 
+    # Benchmark TileLang kernel (MMA intrinsics based)
     latency = profiler.do_bench(profiler.func, warmup=25)
-
-    print(latency)
+    print(f"TileLang latency: {latency}")
 
     # Ensure that the latency is not None
     assert latency is not None
 
+    # Benchmark reference program (PyTorch / cuBLAS)
+    ref_latency = profiler.do_bench(ref_program, warmup=25)
+    print(f"Ref (cuBLAS) latency: {ref_latency}")
+
+    # Correctness check
     profiler.assert_allclose(ref_program, atol=1e-2, rtol=1e-2)
+    print("All check passed.")
+
+    # Performance summary
+    flops = 2 * M * N * K
+    tilelang_tflops = flops / latency * 1e-9
+    ref_tflops = flops / ref_latency * 1e-9
+    print(f"TileLang TFlops: {tilelang_tflops:.2f}")
+    print(f"Ref TFlops:      {ref_tflops:.2f}")
+    print(f"Ratio:           {tilelang_tflops / ref_tflops * 100:.1f}%")
 
 
 def run_regression_perf(M=4096, N=4096, K=4096):

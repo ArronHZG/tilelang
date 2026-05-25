@@ -134,6 +134,12 @@ def get_best_config(
     benchmark_multi_gpu: bool = False,
     benchmark_devices: list[int] | None = None,
 ):
+    import inspect
+    import tilelang
+
+    # 打印版本信息和 AutoTuner.run() API 签名，便于排查远程集群兼容性问题
+    print(f"[INFO] TileLang version: {tilelang.__version__}")
+
     autotuner, _, _ = _build_autotuner(
         M=M,
         N=N,
@@ -145,16 +151,65 @@ def get_best_config(
         cache_input_tensors=cache_input_tensors,
         topk=topk,
     )
-    autotuner_result = autotuner.run(
-        warmup=warmup,
-        rep=rep,
-        timeout=timeout,
-        use_pipeline=use_pipeline,
-        enable_grouped_compile=enable_grouped_compile,
-        group_compile_size=group_compile_size,
-        benchmark_multi_gpu=benchmark_multi_gpu,
-        benchmark_devices=benchmark_devices,
-    )
+
+    # 构造 run() 参数，通过反射检测远程 tilelang 版本是否支持新参数
+    # （旧版 AutoTuner.run() 不支持 use_pipeline / enable_grouped_compile / benchmark_* 参数）
+    run_kwargs = {
+        "warmup": warmup,
+        "rep": rep,
+        "timeout": timeout,
+    }
+    run_sig = inspect.signature(autotuner.run)
+    run_params = set(run_sig.parameters.keys())
+    print(f"[INFO] AutoTuner.run() signature params: {sorted(run_params)}")
+
+    # 深度诊断：检查 run() 是否被 partial 包装，以及原始函数签名
+    from functools import partial
+    if isinstance(autotuner.run, partial):
+        print(f"[INFO] autotuner.run is a partial object!")
+        print(f"[INFO]   partial.args (pre-bound positional): {autotuner.run.args}")
+        print(f"[INFO]   partial.keywords (pre-bound keyword): {autotuner.run.keywords}")
+        underlying_func = autotuner.run.func
+        underlying_sig = inspect.signature(underlying_func)
+        print(f"[INFO]   underlying function: {underlying_func.__qualname__}")
+        print(f"[INFO]   underlying signature params: {sorted(underlying_sig.parameters.keys())}")
+        # 获取 run 方法的源码位置（如果可用）
+        try:
+            src_file = inspect.getsourcefile(underlying_func)
+            src_lines, start_line = inspect.getsourcelines(underlying_func)
+            print(f"[INFO]   source file: {src_file}:{start_line}")
+            print(f"[INFO]   source lines count: {len(src_lines)}")
+        except Exception as e:
+            print(f"[INFO]   source location unavailable: {e}")
+    else:
+        print(f"[INFO] autotuner.run type: {type(autotuner.run).__name__} (not partial)")
+        try:
+            src_file = inspect.getsourcefile(autotuner.run)
+            src_lines, start_line = inspect.getsourcelines(autotuner.run)
+            print(f"[INFO]   source file: {src_file}:{start_line}")
+            print(f"[INFO]   source lines count: {len(src_lines)}")
+        except Exception as e:
+            print(f"[INFO]   source location unavailable: {e}")
+
+    # 仅当 run() 签名中存在对应参数时才传入（版本兼容）
+    if "use_pipeline" in run_params:
+        run_kwargs["use_pipeline"] = use_pipeline
+    else:
+        print("[WARNING] AutoTuner.run() does not support 'use_pipeline' parameter (old tilelang version), skipping.")
+
+    if "enable_grouped_compile" in run_params:
+        run_kwargs["enable_grouped_compile"] = enable_grouped_compile
+        run_kwargs["group_compile_size"] = group_compile_size
+    else:
+        print("[WARNING] AutoTuner.run() does not support 'enable_grouped_compile' parameter (old tilelang version), skipping.")
+
+    if "benchmark_devices" in run_params:
+        run_kwargs["benchmark_devices"] = benchmark_devices
+        run_kwargs["benchmark_multi_gpu"] = benchmark_multi_gpu
+    else:
+        print("[WARNING] AutoTuner.run() does not support 'benchmark_*' parameters (old tilelang version), skipping.")
+
+    autotuner_result = autotuner.run(**run_kwargs)
     return autotuner_result
 
 
@@ -347,7 +402,7 @@ if __name__ == "__main__":
         nargs="+",
         type=int,
         default=[],
-        help="Benchmark devices number (e.g. --benchmark-devices 0 1 2)",
+        help="Benchmark devices number (e.g. --benchmark_devices 0 1 2)",
     )
 
     args = parser.parse_args()
